@@ -27,4 +27,4 @@ npm run dev
 ## Note
 
 This application is fully integrated with a **Supabase + PostgreSQL backend**.
-For configuration instructions, schema scripts, and seeding steps, please refer to [BACKEND_SETUP.md](file:///C:/Users/shukr/OneDrive%20-%20lightdrive/Desktop/TSE%20Project/BACKEND_SETUP.md).
+For configuration instructions, schema scripts, and seeding steps, please refer to [BACKEND_SETUP.md](./BACKEND_SETUP.md).

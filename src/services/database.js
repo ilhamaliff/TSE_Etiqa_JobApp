@@ -46,12 +46,20 @@ export async function signOut() {
   }
 }
 
-// Helper to upload a resume PDF file to Supabase Storage resumes bucket
-export async function uploadResume(file, userId) {
-  const fileExt = file.name.split(".").pop();
-  // Safe filename with timestamp to prevent duplicates
-  const fileName = `${userId}/${Date.now()}.${fileExt}`;
-  const filePath = fileName;
+// Helper to upload a private resume PDF file to Supabase Storage resumes bucket
+export async function uploadResumeFile(userId, file) {
+  if (!file) {
+    throw new Error("No file provided.");
+  }
+  if (file.type !== "application/pdf") {
+    throw new Error("File must be a PDF document.");
+  }
+  if (file.size > 5 * 1024 * 1024) {
+    throw new Error("File size must not exceed 5MB.");
+  }
+
+  const cleanFileName = file.name.replace(/[^a-zA-Z0-9.-]/g, "_");
+  const filePath = `${userId}/${Date.now()}-${cleanFileName}`;
 
   const { data, error } = await supabase.storage
     .from("resumes")
@@ -64,11 +72,28 @@ export async function uploadResume(file, userId) {
     throw new Error(error.message || "Failed to upload resume file.");
   }
 
-  const { data: urlData } = supabase.storage
-    .from("resumes")
-    .getPublicUrl(filePath);
+  return filePath;
+}
 
-  return urlData.publicUrl;
+// Generate short-lived signed URL for private resumes (valid for 10 minutes)
+export async function getResumeViewUrl(filePath) {
+  if (!filePath) {
+    throw new Error("No file path provided.");
+  }
+  // Fallback for absolute URLs or legacy mock/seed values
+  if (filePath.startsWith("http://") || filePath.startsWith("https://") || !filePath.includes("/")) {
+    return filePath;
+  }
+
+  const { data, error } = await supabase.storage
+    .from("resumes")
+    .createSignedUrl(filePath, 600);
+
+  if (error || !data) {
+    throw new Error(error?.message || "Failed to generate signed URL.");
+  }
+
+  return data.signedUrl;
 }
 
 // 4. Register a new applicant (supports optional resume PDF file upload)
@@ -92,13 +117,9 @@ export async function registerApplicant(formData, resumeFile) {
 
   let finalResumeUrl = formData.resumeUrl || "";
 
-  // If a file is selected, upload it
+  // If a file is selected, upload it (storing path only)
   if (resumeFile) {
-    try {
-      finalResumeUrl = await uploadResume(resumeFile, user.id);
-    } catch (uploadErr) {
-      console.error("Resume upload failed:", uploadErr.message);
-    }
+    finalResumeUrl = await uploadResumeFile(user.id, resumeFile);
   }
 
   // Create public profile linked to the newly created user ID
@@ -161,7 +182,7 @@ export async function submitJobApplication({ applicantId, jobId, coverLetter, re
   let finalResumeUrl = resumeUrl;
 
   if (resumeFile) {
-    finalResumeUrl = await uploadResume(resumeFile, applicantId);
+    finalResumeUrl = await uploadResumeFile(applicantId, resumeFile);
   }
 
   const applicationPayload = {

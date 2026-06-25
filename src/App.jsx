@@ -35,9 +35,18 @@ import {
   updateJobStatus,
   updateApplicationStatus as updateApplicationStatusService,
   markMyNotificationsRead,
+  getResumeViewUrl,
 } from "./services/database";
-const STORAGE_KEY = "etiqa_job_application_system_data";
-const CURRENT_USER_KEY = "etiqa_job_application_system_current_user";
+
+async function handleViewResume(filePath) {
+  if (!filePath) return;
+  try {
+    const url = await getResumeViewUrl(filePath);
+    window.open(url, "_blank");
+  } catch (err) {
+    alert("Failed to view resume: " + err.message);
+  }
+}
 const applicationStatuses = [
   "Draft",
   "Submitted",
@@ -47,157 +56,7 @@ const applicationStatuses = [
   "Hired",
   "Not Hired",
 ];
-const defaultData = {
-  branches: [
-    {
-      branchId: 1,
-      branchName: "Kuala Lumpur Branch",
-      branchLocation: "Kuala Lumpur",
-      branchAddress: "Level 12, Etiqa Trade Tower, Kuala Lumpur",
-      contactNo: "03-2200 1100",
-    },
-    {
-      branchId: 2,
-      branchName: "Penang Branch",
-      branchLocation: "Penang",
-      branchAddress: "Bayan Lepas Business Centre, Penang",
-      contactNo: "04-640 2200",
-    },
-    {
-      branchId: 3,
-      branchName: "Johor Branch",
-      branchLocation: "Johor Bahru",
-      branchAddress: "Taman Molek Commercial Centre, Johor Bahru",
-      contactNo: "07-330 8800",
-    },
-  ],
-  users: [
-    {
-      userId: 1,
-      fullName: "HR Admin",
-      email: "admin@etiqatrade.com",
-      password: "password123",
-      role: "HR/Admin",
-      dateRegistered: "2026-06-01",
-    },
-    {
-      userId: 2,
-      fullName: "KL Branch Manager",
-      email: "manager.kl@etiqatrade.com",
-      password: "password123",
-      role: "Manager",
-      branchId: 1,
-      department: "Operations",
-      dateRegistered: "2026-06-01",
-    },
-    {
-      userId: 3,
-      fullName: "Test Applicant",
-      email: "applicant@test.com",
-      password: "password123",
-      role: "Applicant",
-      phoneNo: "0123456789",
-      address: "Shah Alam, Selangor",
-      resumeUrl: "test-applicant-resume.pdf",
-      dateRegistered: "2026-06-01",
-    },
-    {
-      userId: 4,
-      fullName: "Siti Nur",
-      email: "siti@example.com",
-      password: "password123",
-      role: "Applicant",
-      phoneNo: "0132223344",
-      address: "Bayan Lepas, Penang",
-      resumeUrl: "siti-nur-resume.pdf",
-      dateRegistered: "2026-06-02",
-    },
-  ],
-  jobs: [
-    {
-      jobId: 101,
-      branchId: 1,
-      adminId: 1,
-      jobTitle: "Admin Executive",
-      jobDescription:
-        "Support daily branch administration, document control, and applicant communication.",
-      jobType: "Full Time",
-      location: "Kuala Lumpur",
-      salaryRange: "RM 2,800 - RM 3,600",
-      requirements:
-        "Diploma or degree in business; good communication skills; able to use office software",
-      postedDate: "2026-06-04",
-      closingDate: "2026-06-24",
-      status: "Open",
-    },
-    {
-      jobId: 102,
-      branchId: 2,
-      adminId: 1,
-      jobTitle: "Customer Service Officer",
-      jobDescription:
-        "Handle customer enquiries, update service records, and support branch service targets.",
-      jobType: "Full Time",
-      location: "Penang",
-      salaryRange: "RM 2,500 - RM 3,200",
-      requirements:
-        "SPM or diploma; patient and polite attitude; basic computer skills",
-      postedDate: "2026-06-06",
-      closingDate: "2026-06-25",
-      status: "Open",
-    },
-    {
-      jobId: 103,
-      branchId: 3,
-      adminId: 1,
-      jobTitle: "Branch Operations Assistant",
-      jobDescription:
-        "Assist the manager with branch reports, scheduling, and application follow-up.",
-      jobType: "Contract",
-      location: "Johor Bahru",
-      salaryRange: "RM 2,400 - RM 3,000",
-      requirements:
-        "Organised work style; able to work in a team; fresh graduates may apply",
-      postedDate: "2026-06-08",
-      closingDate: "2026-06-26",
-      status: "Open",
-    },
-  ],
-  applications: [
-    {
-      applicationId: 5001,
-      applicantId: 3,
-      jobId: 101,
-      applicationDate: "2026-06-10",
-      coverLetter:
-        "I am interested in supporting the Kuala Lumpur branch administration team.",
-      resumeUrl: "test-applicant-resume.pdf",
-      status: "Under Review",
-      lastUpdated: "2026-06-14",
-    },
-    {
-      applicationId: 5002,
-      applicantId: 4,
-      jobId: 102,
-      applicationDate: "2026-06-13",
-      coverLetter: "I have experience helping customers at a service counter.",
-      resumeUrl: "siti-nur-resume.pdf",
-      status: "Submitted",
-      lastUpdated: "2026-06-13",
-    },
-  ],
-  notifications: [
-    {
-      notificationId: 9001,
-      applicantId: 3,
-      applicationId: 5001,
-      message: "Your Admin Executive application is now under review.",
-      notificationType: "Status Update",
-      isRead: false,
-      createdAt: "2026-06-14 2:15 PM",
-    },
-  ],
-};
+// Old mock defaultData removed. Supabase PostgreSQL dynamic tables are used instead.
 function today() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -397,6 +256,16 @@ function App() {
     }
   }
   async function register(user, resumeFile) {
+    if (resumeFile) {
+      if (resumeFile.type !== "application/pdf") {
+        setNotice("Registration failed: Resume file must be a PDF document.");
+        return;
+      }
+      if (resumeFile.size > 5 * 1024 * 1024) {
+        setNotice("Registration failed: Resume file size must not exceed 5MB.");
+        return;
+      }
+    }
     setLoading(true);
     try {
       const profile = await registerApplicant(user, resumeFile);
@@ -429,6 +298,16 @@ function App() {
     if (!formData.coverLetter.trim() || !formData.resumeUrl.trim()) {
       setNotice("Please complete the cover letter and resume file name.");
       return;
+    }
+    if (resumeFile) {
+      if (resumeFile.type !== "application/pdf") {
+        setNotice("Application failed: Resume file must be a PDF document.");
+        return;
+      }
+      if (resumeFile.size > 5 * 1024 * 1024) {
+        setNotice("Application failed: Resume file size must not exceed 5MB.");
+        return;
+      }
     }
     const duplicate = data.applications.some(
       (app) =>
@@ -1153,8 +1032,22 @@ function RegisterPage({ register, changePage }) {
               accept=".pdf"
               onChange={(e) => {
                 const file = e.target.files[0];
-                setResumeFile(file);
                 if (file) {
+                  if (file.type !== "application/pdf") {
+                    setNotice("Resume file must be a PDF document.");
+                    e.target.value = null;
+                    setResumeFile(null);
+                    setResumeUrl("");
+                    return;
+                  }
+                  if (file.size > 5 * 1024 * 1024) {
+                    setNotice("Resume file size must not exceed 5MB.");
+                    e.target.value = null;
+                    setResumeFile(null);
+                    setResumeUrl("");
+                    return;
+                  }
+                  setResumeFile(file);
                   setResumeUrl(file.name);
                 }
               }}
@@ -1456,14 +1349,13 @@ function JobDetailsPage({
           {currentUser?.resumeUrl && (
             <div className="rounded-md bg-brand-50 p-3 text-sm text-brand-900 flex items-center justify-between">
               <span>Current resume on file is saved.</span>
-              <a
-                href={currentUser.resumeUrl}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="font-bold underline text-brand-700 hover:text-brand-900"
+              <button
+                type="button"
+                onClick={() => handleViewResume(currentUser.resumeUrl)}
+                className="font-bold underline text-brand-700 hover:text-brand-900 bg-transparent border-none cursor-pointer p-0"
               >
                 View Current PDF
-              </a>
+              </button>
             </div>
           )}
           <label className="grid gap-2">
@@ -1474,8 +1366,22 @@ function JobDetailsPage({
               accept=".pdf"
               onChange={(e) => {
                 const file = e.target.files[0];
-                setResumeFile(file);
                 if (file) {
+                  if (file.type !== "application/pdf") {
+                    setNotice("Resume file must be a PDF document.");
+                    e.target.value = null;
+                    setResumeFile(null);
+                    setResumeUrl("");
+                    return;
+                  }
+                  if (file.size > 5 * 1024 * 1024) {
+                    setNotice("Resume file size must not exceed 5MB.");
+                    e.target.value = null;
+                    setResumeFile(null);
+                    setResumeUrl("");
+                    return;
+                  }
+                  setResumeFile(file);
                   setResumeUrl(file.name);
                 }
               }}
@@ -1874,20 +1780,22 @@ function ApplicationManagementPage({
           rows={applications.map((application) => {
             const job = getJob(data.jobs, application.jobId);
             const applicant = getUser(data.users, application.applicantId);
+            const branch = getBranch(data.branches, job.branchId);
+            const branchDisplay = branch ? `${branch.branchLocation} (${branch.branchName})` : "Unknown";
             return [
               applicant?.fullName ?? "Unknown",
               job.jobTitle,
-              application.resumeUrl && (application.resumeUrl.startsWith("http://") || application.resumeUrl.startsWith("https://")) ? (
-                <a
-                  href={application.resumeUrl}
-                  target="_blank"
-                  rel="noopener noreferrer"
-                  className="font-semibold text-brand-700 hover:text-brand-900 underline"
+              branchDisplay,
+              application.resumeUrl ? (
+                <button
+                  key="resume"
+                  onClick={() => handleViewResume(application.resumeUrl)}
+                  className="font-semibold text-brand-700 hover:text-brand-900 underline bg-transparent border-none p-0 cursor-pointer text-left"
                 >
                   View PDF
-                </a>
+                </button>
               ) : (
-                application.resumeUrl
+                <span key="no-resume" className="text-slate-400">No resume</span>
               ),
               <StatusBadge key="status" status={application.status} />,
               <select
@@ -2333,6 +2241,7 @@ function ErrorBox({ children }) {
 }
 function InfoRow({ label, value }) {
   const isUrl = typeof value === "string" && (value.startsWith("http://") || value.startsWith("https://"));
+  const isStoragePath = typeof value === "string" && value.toLowerCase().endsWith(".pdf") && !isUrl;
   return (
     <div className="rounded-md bg-slate-50 p-3">
       <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
@@ -2347,6 +2256,13 @@ function InfoRow({ label, value }) {
         >
           View PDF Resume
         </a>
+      ) : isStoragePath ? (
+        <button
+          onClick={() => handleViewResume(value)}
+          className="mt-1 block text-left text-sm font-bold text-brand-700 hover:text-brand-900 underline bg-transparent border-none p-0 cursor-pointer"
+        >
+          View PDF Resume
+        </button>
       ) : (
         <p className="mt-1 text-sm font-medium text-slate-800">{value}</p>
       )}
