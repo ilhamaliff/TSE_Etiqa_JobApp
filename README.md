@@ -1,6 +1,6 @@
 # Etiqa Trade Job Application System
 
-A simple React frontend prototype for a job application management system.
+An application system for job applications, integrated with Supabase Auth, PostgreSQL, and Storage for secure resume uploads.
 
 ## Tech Stack
 
@@ -8,6 +8,8 @@ A simple React frontend prototype for a job application management system.
 - Vite
 - JavaScript
 - Tailwind CSS
+- Supabase (Auth, Database, Storage)
+
 
 ## How To Run
 
