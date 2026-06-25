@@ -26,4 +26,5 @@ npm run dev
 
 ## Note
 
-This version stores demo data in browser localStorage. A real backend/database can be connected later by replacing the localStorage data functions in `src/App.jsx`.
+This application is fully integrated with a **Supabase + PostgreSQL backend**.
+For configuration instructions, schema scripts, and seeding steps, please refer to [BACKEND_SETUP.md](file:///C:/Users/shukr/OneDrive%20-%20lightdrive/Desktop/TSE%20Project/BACKEND_SETUP.md).
