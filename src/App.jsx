@@ -24,6 +24,18 @@ import {
   XCircle,
 } from "lucide-react";
 import { useEffect, useState } from "react";
+import {
+  getCurrentProfile,
+  signIn,
+  signOut,
+  registerApplicant,
+  fetchInitialData,
+  submitJobApplication,
+  saveJobPosting,
+  updateJobStatus,
+  updateApplicationStatus as updateApplicationStatusService,
+  markMyNotificationsRead,
+} from "./services/database";
 const STORAGE_KEY = "etiqa_job_application_system_data";
 const CURRENT_USER_KEY = "etiqa_job_application_system_current_user";
 const applicationStatuses = [
@@ -186,24 +198,6 @@ const defaultData = {
     },
   ],
 };
-function loadData() {
-  const saved = localStorage.getItem(STORAGE_KEY);
-  if (!saved) return defaultData;
-  try {
-    return JSON.parse(saved);
-  } catch {
-    return defaultData;
-  }
-}
-function loadCurrentUser() {
-  const saved = localStorage.getItem(CURRENT_USER_KEY);
-  if (!saved) return null;
-  try {
-    return JSON.parse(saved);
-  } catch {
-    return null;
-  }
-}
 function today() {
   return new Date().toISOString().slice(0, 10);
 }
@@ -220,16 +214,17 @@ function makeId() {
   return Date.now() + Math.floor(Math.random() * 1000);
 }
 function App() {
-  const [data, setData] = useState(() => loadData());
-  const [currentUser, setCurrentUser] = useState(() => loadCurrentUser());
-  const [page, setPage] = useState(() => {
-    const savedUser = loadCurrentUser();
-    if (savedUser?.role === "Applicant") return "applicantDashboard";
-    if (savedUser?.role === "HR/Admin") return "adminDashboard";
-    if (savedUser?.role === "Manager") return "managerDashboard";
-    return "landing";
+  const [data, setData] = useState({
+    branches: [],
+    users: [],
+    jobs: [],
+    applications: [],
+    notifications: []
   });
-  const [selectedJobId, setSelectedJobId] = useState(data.jobs[0]?.jobId ?? 0);
+  const [currentUser, setCurrentUser] = useState(null);
+  const [page, setPage] = useState("landing");
+  const [loading, setLoading] = useState(true);
+  const [selectedJobId, setSelectedJobId] = useState(0);
   const [selectedApplicationId, setSelectedApplicationId] = useState(null);
   const [searchTerm, setSearchTerm] = useState("");
   const [branchFilter, setBranchFilter] = useState("All branches");
@@ -237,16 +232,56 @@ function App() {
   const [statusFilter, setStatusFilter] = useState("All statuses");
   const [notice, setNotice] = useState("");
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
-  useEffect(() => {
-    localStorage.setItem(STORAGE_KEY, JSON.stringify(data));
-  }, [data]);
-  useEffect(() => {
-    if (currentUser) {
-      localStorage.setItem(CURRENT_USER_KEY, JSON.stringify(currentUser));
-    } else {
-      localStorage.removeItem(CURRENT_USER_KEY);
+
+  async function reloadData() {
+    setLoading(true);
+    try {
+      const [profile, dbData] = await Promise.all([
+        getCurrentProfile(),
+        fetchInitialData(),
+      ]);
+      setData(dbData);
+      setCurrentUser(profile);
+      if (dbData.jobs?.length > 0 && !selectedJobId) {
+        setSelectedJobId(dbData.jobs[0].jobId);
+      }
+      setNotice("Data has been refreshed.");
+    } catch (err) {
+      console.error("Refresh error:", err);
+      setNotice("Failed to refresh data: " + err.message);
+    } finally {
+      setLoading(false);
     }
-  }, [currentUser]);
+  }
+
+  useEffect(() => {
+    async function init() {
+      try {
+        const [profile, dbData] = await Promise.all([
+          getCurrentProfile(),
+          fetchInitialData(),
+        ]);
+        setData(dbData);
+        setCurrentUser(profile);
+        if (dbData.jobs?.length > 0) {
+          setSelectedJobId(dbData.jobs[0].jobId);
+        }
+        if (profile) {
+          if (profile.role === "Applicant") setPage("applicantDashboard");
+          else if (profile.role === "HR/Admin") setPage("adminDashboard");
+          else if (profile.role === "Manager") setPage("managerDashboard");
+        } else {
+          setPage("landing");
+        }
+      } catch (err) {
+        console.error("Initialization error:", err);
+        setNotice("Failed to load initial data from database: " + err.message);
+      } finally {
+        setLoading(false);
+      }
+    }
+    init();
+  }, []);
   const selectedJob =
     data.jobs.find((job) => job.jobId === selectedJobId) ?? data.jobs[0];
   const selectedApplication =
@@ -319,61 +354,69 @@ function App() {
     setSelectedJobId(jobId);
     changePage("jobDetails");
   }
-  function login(email, password) {
-    const user = data.users.find(
-      (item) =>
-        item.email.toLowerCase() === email.toLowerCase() &&
-        item.password === password,
-    );
-    if (!user) {
-      setNotice("Invalid email or password.");
-      return;
+  async function login(email, password) {
+    setLoading(true);
+    try {
+      const profile = await signIn(email, password);
+      setCurrentUser(profile);
+      setNotice(`Logged in as ${profile.role}.`);
+      setSearchTerm("");
+      setBranchFilter("All branches");
+      setJobFilter("All jobs");
+      setStatusFilter("All statuses");
+      setSelectedApplicationId(null);
+      setPage(
+        profile.role === "Applicant"
+          ? "applicantDashboard"
+          : profile.role === "HR/Admin"
+            ? "adminDashboard"
+            : "managerDashboard",
+      );
+    } catch (err) {
+      setNotice(err.message || "Invalid email or password.");
+    } finally {
+      setLoading(false);
     }
-    setCurrentUser(user);
-    setNotice(`Logged in as ${user.role}.`);
-    setSearchTerm("");
-    setBranchFilter("All branches");
-    setJobFilter("All jobs");
-    setStatusFilter("All statuses");
-    setSelectedApplicationId(null);
-    setPage(
-      user.role === "Applicant"
-        ? "applicantDashboard"
-        : user.role === "HR/Admin"
-          ? "adminDashboard"
-          : "managerDashboard",
-    );
   }
-  function logout() {
-    setCurrentUser(null);
-    setSearchTerm("");
-    setBranchFilter("All branches");
-    setJobFilter("All jobs");
-    setStatusFilter("All statuses");
-    setSelectedApplicationId(null);
-    setNotice("You have logged out.");
-    setPage("landing");
-  }
-  function register(user) {
-    const existing = data.users.some(
-      (item) => item.email.toLowerCase() === user.email.toLowerCase(),
-    );
-    if (existing) {
-      setNotice("This email is already registered.");
-      return;
+  async function logout() {
+    setLoading(true);
+    try {
+      await signOut();
+      setCurrentUser(null);
+      setSearchTerm("");
+      setBranchFilter("All branches");
+      setJobFilter("All jobs");
+      setStatusFilter("All statuses");
+      setSelectedApplicationId(null);
+      setNotice("You have logged out.");
+      setPage("landing");
+    } catch (err) {
+      setNotice("Logout failed: " + err.message);
+    } finally {
+      setLoading(false);
     }
-    const newUser = {
-      ...user,
-      userId: makeId(),
-      role: "Applicant",
-      dateRegistered: today(),
-    };
-    setData({ ...data, users: [...data.users, newUser] });
-    setCurrentUser(newUser);
-    setNotice("Registration successful.");
-    setPage("applicantDashboard");
   }
-  function submitApplication(formData) {
+  async function register(user, resumeFile) {
+    setLoading(true);
+    try {
+      const profile = await registerApplicant(user, resumeFile);
+      
+      // Update local state with the new profile
+      setData(prev => ({
+        ...prev,
+        users: [...prev.users, profile]
+      }));
+      
+      setCurrentUser(profile);
+      setNotice("Registration successful.");
+      setPage("applicantDashboard");
+    } catch (err) {
+      setNotice(err.message || "Registration failed.");
+    } finally {
+      setLoading(false);
+    }
+  }
+  async function submitApplication(formData, resumeFile) {
     if (!currentUser || currentUser.role !== "Applicant") {
       setNotice("Please login as an applicant before applying.");
       setPage("login");
@@ -396,34 +439,26 @@ function App() {
       setNotice("You have already applied for this job.");
       return;
     }
-    const newApplication = {
-      applicationId: makeId(),
-      applicantId: currentUser.userId,
-      jobId: selectedJob.jobId,
-      applicationDate: today(),
-      coverLetter: formData.coverLetter,
-      resumeUrl: formData.resumeUrl,
-      status: "Submitted",
-      lastUpdated: today(),
-    };
-    const newNotification = {
-      notificationId: makeId(),
-      applicantId: currentUser.userId,
-      applicationId: newApplication.applicationId,
-      message: `Your application for ${selectedJob.jobTitle} was submitted successfully.`,
-      notificationType: "Application",
-      isRead: false,
-      createdAt: nowText(),
-    };
-    setData({
-      ...data,
-      applications: [...data.applications, newApplication],
-      notifications: [newNotification, ...data.notifications],
-    });
-    setNotice("Application submitted successfully.");
-    setPage("applicantDashboard");
+    setLoading(true);
+    try {
+      await submitJobApplication({
+        applicantId: currentUser.userId,
+        jobId: selectedJob.jobId,
+        coverLetter: formData.coverLetter,
+        resumeUrl: formData.resumeUrl,
+        resumeFile: resumeFile,
+        jobTitle: selectedJob.jobTitle,
+      });
+      setNotice("Application submitted successfully.");
+      await reloadData();
+      setPage("applicantDashboard");
+    } catch (err) {
+      setNotice(err.message || "Failed to submit application.");
+    } finally {
+      setLoading(false);
+    }
   }
-  function saveJob(job) {
+  async function saveJob(job) {
     if (
       !job.jobTitle.trim() ||
       !job.jobDescription.trim() ||
@@ -432,81 +467,80 @@ function App() {
       setNotice("Please complete the required job fields.");
       return false;
     }
-    const exists = data.jobs.some((item) => item.jobId === job.jobId);
-    const updatedJobs = exists
-      ? data.jobs.map((item) => (item.jobId === job.jobId ? job : item))
-      : [...data.jobs, job];
-    setData({ ...data, jobs: updatedJobs });
-    setNotice(exists ? "Job posting updated." : "Job posting created.");
-    return true;
+    setLoading(true);
+    try {
+      const exists = job.jobId && job.jobId !== 0;
+      await saveJobPosting(job, currentUser.userId);
+      setNotice(exists ? "Job posting updated." : "Job posting created.");
+      await reloadData();
+      return true;
+    } catch (err) {
+      setNotice(err.message || "Failed to save job posting.");
+      return false;
+    } finally {
+      setLoading(false);
+    }
   }
-  function toggleJobStatus(jobId) {
-    const updatedJobs = data.jobs.map((job) =>
-      job.jobId === jobId
-        ? { ...job, status: job.status === "Open" ? "Closed" : "Open" }
-        : job,
-    );
-    setData({ ...data, jobs: updatedJobs });
-    setNotice("Job posting status updated.");
+  async function toggleJobStatus(jobId) {
+    const job = data.jobs.find((j) => j.jobId === jobId);
+    if (!job) return;
+    const newStatus = job.status === "Open" ? "Closed" : "Open";
+    setLoading(true);
+    try {
+      await updateJobStatus(jobId, newStatus);
+      setNotice("Job posting status updated.");
+      await reloadData();
+    } catch (err) {
+      setNotice(err.message || "Failed to update job status.");
+    } finally {
+      setLoading(false);
+    }
   }
-  function updateApplicationStatus(applicationId, status, managerComment) {
+  async function updateApplicationStatus(applicationId, status, managerComment) {
     const application = data.applications.find(
       (item) => item.applicationId === applicationId,
     );
-    if (!application || application.status === status) return;
+    if (!application) return;
     const job = getJob(data.jobs, application.jobId);
-    const updatedApplications = data.applications.map((item) =>
-      item.applicationId === applicationId
-        ? {
-            ...item,
-            status,
-            lastUpdated: today(),
-            managerComment: managerComment ?? item.managerComment,
-          }
-        : item,
-    );
-    const newNotification = {
-      notificationId: makeId(),
-      applicantId: application.applicantId,
-      applicationId,
-      message: `Your application for ${job.jobTitle} changed to ${status}.`,
-      notificationType: "Status Update",
-      isRead: false,
-      createdAt: nowText(),
-    };
-    setData({
-      ...data,
-      applications: updatedApplications,
-      notifications: [newNotification, ...data.notifications],
-    });
-    setNotice("Application status updated and notification created.");
+    setLoading(true);
+    try {
+      await updateApplicationStatusService(
+        applicationId,
+        status,
+        application.applicantId,
+        job.jobTitle
+      );
+      setNotice("Application status updated and notification created.");
+      await reloadData();
+    } catch (err) {
+      setNotice(err.message || "Failed to update application status.");
+    } finally {
+      setLoading(false);
+    }
   }
-  function markNotificationsRead() {
+  async function markNotificationsRead() {
     if (!currentUser) return;
-    setData({
-      ...data,
-      notifications: data.notifications.map((item) =>
-        item.applicantId === currentUser.userId
-          ? { ...item, isRead: true }
-          : item,
-      ),
-    });
+    setLoading(true);
+    try {
+      await markMyNotificationsRead(currentUser.userId);
+      await reloadData();
+    } catch (err) {
+      setNotice(err.message || "Failed to update notifications.");
+    } finally {
+      setLoading(false);
+    }
   }
-  function resetData() {
-    localStorage.removeItem(STORAGE_KEY);
-    localStorage.removeItem(CURRENT_USER_KEY);
-    setData(defaultData);
-    setCurrentUser(null);
-    setSelectedJobId(defaultData.jobs[0]?.jobId ?? 0);
-    setSelectedApplicationId(null);
-    setSearchTerm("");
-    setBranchFilter("All branches");
-    setJobFilter("All jobs");
-    setStatusFilter("All statuses");
-    setMobileMenuOpen(false);
-    setNotice("Demo data has been reset.");
-    setPage("landing");
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[#f7faf8] flex flex-col items-center justify-center text-ink">
+        <div className="flex flex-col items-center gap-4">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-brand-700"></div>
+          <p className="text-sm font-semibold text-slate-600">Loading Etiqa Job Application System...</p>
+        </div>
+      </div>
+    );
   }
+
   return (
     <div className="min-h-screen bg-[#f7faf8] text-ink">
       <TopNav
@@ -663,10 +697,10 @@ function App() {
       </main>
       <button
         className="fixed bottom-4 right-4 z-30 inline-flex items-center gap-2 rounded-md border border-slate-300 bg-white px-3 py-2 text-xs font-semibold text-slate-600 shadow-soft hover:bg-slate-50"
-        onClick={resetData}
+        onClick={reloadData}
       >
         <RotateCcw className="h-4 w-4" aria-hidden="true" />
-        Reset demo data
+        Refresh data
       </button>
     </div>
   );
@@ -1050,6 +1084,7 @@ function RegisterPage({ register, changePage }) {
   const [phoneNo, setPhoneNo] = useState("");
   const [address, setAddress] = useState("");
   const [resumeUrl, setResumeUrl] = useState("");
+  const [resumeFile, setResumeFile] = useState(null);
   const [password, setPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [error, setError] = useState("");
@@ -1072,7 +1107,7 @@ function RegisterPage({ register, changePage }) {
       return;
     }
     setError("");
-    register({ fullName, email, password, phoneNo, address, resumeUrl });
+    register({ fullName, email, password, phoneNo, address, resumeUrl }, resumeFile);
   }
   return (
     <div className="page-shell">
@@ -1110,12 +1145,21 @@ function RegisterPage({ register, changePage }) {
             type="email"
           />
           <TextInput label="Address" value={address} onChange={setAddress} />
-          <TextInput
-            label="Resume file name"
-            value={resumeUrl}
-            onChange={setResumeUrl}
-            placeholder="resume.pdf"
-          />
+          <label className="grid gap-2">
+            <span className="label">Resume (PDF Format)</span>
+            <input
+              className="input-field"
+              type="file"
+              accept=".pdf"
+              onChange={(e) => {
+                const file = e.target.files[0];
+                setResumeFile(file);
+                if (file) {
+                  setResumeUrl(file.name);
+                }
+              }}
+            />
+          </label>
           <div className="grid gap-4 sm:grid-cols-2">
             <TextInput
               label="Password"
@@ -1322,6 +1366,7 @@ function JobDetailsPage({
   const [resumeUrl, setResumeUrl] = useState(
     currentUser?.resumeUrl || "resume.pdf",
   );
+  const [resumeFile, setResumeFile] = useState(null);
   return (
     <div className="page-shell">
       <button
@@ -1389,7 +1434,7 @@ function JobDetailsPage({
           className="panel grid gap-4 p-6"
           onSubmit={(event) => {
             event.preventDefault();
-            submitApplication({ coverLetter, resumeUrl });
+            submitApplication({ coverLetter, resumeUrl }, resumeFile);
           }}
         >
           <PageHeading
@@ -1408,12 +1453,34 @@ function JobDetailsPage({
             onChange={() => undefined}
             disabled
           />
-          <TextInput
-            label="Resume file name"
-            value={resumeUrl}
-            onChange={setResumeUrl}
-            placeholder="resume.pdf"
-          />
+          {currentUser?.resumeUrl && (
+            <div className="rounded-md bg-brand-50 p-3 text-sm text-brand-900 flex items-center justify-between">
+              <span>Current resume on file is saved.</span>
+              <a
+                href={currentUser.resumeUrl}
+                target="_blank"
+                rel="noopener noreferrer"
+                className="font-bold underline text-brand-700 hover:text-brand-900"
+              >
+                View Current PDF
+              </a>
+            </div>
+          )}
+          <label className="grid gap-2">
+            <span className="label">Upload New Resume (PDF Format)</span>
+            <input
+              className="input-field"
+              type="file"
+              accept=".pdf"
+              onChange={(e) => {
+                const file = e.target.files[0];
+                setResumeFile(file);
+                if (file) {
+                  setResumeUrl(file.name);
+                }
+              }}
+            />
+          </label>
           <label className="grid gap-2">
             <span className="label">Cover letter</span>
             <textarea
@@ -1538,13 +1605,13 @@ function JobManagementPage({
     status: "Open",
   };
   const [formJob, setFormJob] = useState(emptyJob);
-  function submit(event) {
+  async function submit(event) {
     event.preventDefault();
-    const branch = getBranch(data.branches, Number(formJob.branchId));
-    const saved = saveJob({
+    const branch = getBranch(data.branches, formJob.branchId);
+    const saved = await saveJob({
       ...formJob,
-      jobId: formJob.jobId || makeId(),
-      branchId: Number(formJob.branchId),
+      jobId: formJob.jobId,
+      branchId: formJob.branchId,
       adminId: currentUser.userId,
       location: branch.branchLocation,
     });
@@ -1621,7 +1688,7 @@ function JobManagementPage({
             className="input-field"
             value={formJob.branchId}
             onChange={(event) =>
-              setFormJob({ ...formJob, branchId: Number(event.target.value) })
+              setFormJob({ ...formJob, branchId: event.target.value })
             }
           >
             {data.branches.map((branch) => (
@@ -1810,8 +1877,18 @@ function ApplicationManagementPage({
             return [
               applicant?.fullName ?? "Unknown",
               job.jobTitle,
-              getBranch(data.branches, job.branchId).branchLocation,
-              application.resumeUrl,
+              application.resumeUrl && (application.resumeUrl.startsWith("http://") || application.resumeUrl.startsWith("https://")) ? (
+                <a
+                  href={application.resumeUrl}
+                  target="_blank"
+                  rel="noopener noreferrer"
+                  className="font-semibold text-brand-700 hover:text-brand-900 underline"
+                >
+                  View PDF
+                </a>
+              ) : (
+                application.resumeUrl
+              ),
               <StatusBadge key="status" status={application.status} />,
               <select
                 key="update"
@@ -2255,12 +2332,24 @@ function ErrorBox({ children }) {
   );
 }
 function InfoRow({ label, value }) {
+  const isUrl = typeof value === "string" && (value.startsWith("http://") || value.startsWith("https://"));
   return (
     <div className="rounded-md bg-slate-50 p-3">
       <p className="text-xs font-semibold uppercase tracking-wide text-slate-500">
         {label}
       </p>
-      <p className="mt-1 text-sm font-medium text-slate-800">{value}</p>
+      {isUrl ? (
+        <a
+          href={value}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="mt-1 block text-sm font-bold text-brand-700 hover:text-brand-900 underline"
+        >
+          View PDF Resume
+        </a>
+      ) : (
+        <p className="mt-1 text-sm font-medium text-slate-800">{value}</p>
+      )}
     </div>
   );
 }
